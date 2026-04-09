@@ -1,0 +1,181 @@
+"""
+Data collector for fetching historical Ethereum data from Kraken
+"""
+import requests
+import pandas as pd
+import time
+from datetime import datetime, timedelta
+import json
+import config
+
+class KrakenDataCollector:
+    def __init__(self):
+        self.base_url = config.KRAKEN_REST_URL
+        
+    def get_ohlc_data(self, pair='ETHUSD', interval=1, since=None):
+        """
+        Fetch OHLC data from Kraken
+        
+        Args:
+            pair: Trading pair (default: ETHUSD)
+            interval: Timeframe in minutes (1, 5, 15, 30, 60, etc.)
+            since: Unix timestamp to fetch data from
+        """
+        endpoint = f"{self.base_url}/0/public/OHLC"
+        params = {
+            'pair': pair,
+            'interval': interval
+        }
+        
+        if since:
+            params['since'] = since
+            
+        try:
+            response = requests.get(endpoint, params=params)
+            response.raise_for_status()
+            data = response.json()
+            
+            if data['error']:
+                print(f"Kraken API Error: {data['error']}")
+                return None
+                
+            # Extract OHLC data
+            pair_key = list(data['result'].keys())[0]  # Get the pair key
+            ohlc_data = data['result'][pair_key]
+            
+            # Convert to DataFrame
+            df = pd.DataFrame(ohlc_data, columns=[
+                'timestamp', 'open', 'high', 'low', 'close', 
+                'vwap', 'volume', 'count'
+            ])
+            
+            # Convert timestamp to datetime
+            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
+            
+            # Convert price columns to float
+            for col in ['open', 'high', 'low', 'close', 'vwap', 'volume']:
+                df[col] = df[col].astype(float)
+                
+            return df, data['result']['last']
+            
+        except Exception as e:
+            print(f"Error fetching data: {e}")
+            return None, None
+    
+    def fetch_historical_data(self, days=120, interval=1):
+        """
+        Fetch complete historical data for specified number of days
+        
+        Args:
+            days: Number of days to fetch
+            interval: Timeframe in minutes
+        """
+        print(f"Fetching {days} days of {interval}-minute ETH/USD data from Kraken...")
+        
+        # Calculate start timestamp
+        end_time = datetime.now()
+        start_time = end_time - timedelta(days=days)
+        since = int(start_time.timestamp())
+        
+        all_data = []
+        request_count = 0
+        
+        while True:
+            df, last_timestamp = self.get_ohlc_data(
+                pair='ETHUSD',
+                interval=interval,
+                since=since
+            )
+            
+            if df is None or df.empty:
+                break
+                
+            all_data.append(df)
+            request_count += 1
+            
+            # Check if we've reached the end
+            if int(last_timestamp) >= int(end_time.timestamp()):
+                break
+                
+            since = last_timestamp
+            
+            # Rate limiting - Kraken allows 1 request per second for public endpoints
+            time.sleep(1)
+            
+            if request_count % 10 == 0:
+                print(f"Fetched {request_count} batches, latest: {df.iloc[-1]['timestamp']}")
+        
+        # Combine all data
+        if all_data:
+            full_df = pd.concat(all_data, ignore_index=True)
+            full_df = full_df.drop_duplicates(subset=['timestamp'])
+            full_df = full_df.sort_values('timestamp')
+            full_df.reset_index(drop=True, inplace=True)
+            
+            print(f"\nSuccessfully fetched {len(full_df)} candles")
+            print(f"Date range: {full_df.iloc[0]['timestamp']} to {full_df.iloc[-1]['timestamp']}")
+            
+            # Save to CSV
+            filename = f"{config.DATA_DIR}/eth_usd_{interval}m_{days}d.csv"
+            full_df.to_csv(filename, index=False)
+            print(f"Data saved to {filename}")
+            
+            return full_df
+        else:
+            print("No data fetched")
+            return None
+    
+    def get_recent_trades(self, pair='ETHUSD', since=None):
+        """Fetch recent trades for volume analysis"""
+        endpoint = f"{self.base_url}/0/public/Trades"
+        params = {'pair': pair}
+        
+        if since:
+            params['since'] = since
+            
+        try:
+            response = requests.get(endpoint, params=params)
+            response.raise_for_status()
+            data = response.json()
+            
+            if data['error']:
+                print(f"Error: {data['error']}")
+                return None
+                
+            return data['result']
+        except Exception as e:
+            print(f"Error fetching trades: {e}")
+            return None
+
+def main():
+    """Main function to run data collection"""
+    collector = KrakenDataCollector()
+    
+    print("=" * 60)
+    print("Kraken ETH/USD Data Collector")
+    print("=" * 60)
+    
+    # Fetch 1-minute data for 120 days
+    df = collector.fetch_historical_data(days=config.LOOKBACK_DAYS, interval=1)
+    
+    if df is not None:
+        print("\n" + "=" * 60)
+        print("Data Summary:")
+        print("=" * 60)
+        print(f"Total candles: {len(df)}")
+        print(f"Date range: {df.iloc[0]['timestamp']} to {df.iloc[-1]['timestamp']}")
+        print(f"\nPrice statistics:")
+        print(f"  High: ${df['high'].max():.2f}")
+        print(f"  Low: ${df['low'].min():.2f}")
+        print(f"  Average: ${df['close'].mean():.2f}")
+        print(f"\nVolume statistics:")
+        print(f"  Total volume: {df['volume'].sum():.2f} ETH")
+        print(f"  Average volume: {df['volume'].mean():.2f} ETH")
+        print("\nData collection complete! Ready for backtesting.")
+    else:
+        print("Data collection failed!")
+
+if __name__ == "__main__":
+    main()
+"/Users/nihal/cursor-projects/Ethereum swing trading/.venv/bin/python" "/Users/nihal/cursor-projects/Ethereum swing trading/data_collector.py"
+
