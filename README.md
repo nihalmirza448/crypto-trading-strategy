@@ -16,9 +16,21 @@ The strategy enters trades only when multiple independent signals align, forming
 Trades are managed with predefined time-based exit rules, focusing on capturing profit targets within a specified window. The strategy employs a fixed position size and does not use traditional stop-losses, instead relying on the robust entry confluence and time-based profit taking.
 
 ## Backtested Performance
-Based on extensive backtesting on 1-hour candles across various timeframes, the strategy has demonstrated strong results:
--   **Win Rate:** Approximately 74%
--   **Annualized Return:** ~1100% (with optimal leverage)
+
+Based on extensive backtesting on 1-hour candles, the Professional Trading Strategy has demonstrated strong results under various conditions. The initial figures (74% Win Rate and ~1100% Annualized Return) generally align with high-leverage 1h runs.
+
+Below are detailed results from a leverage sweep run on ETH and BTC 1h data (approximately 1 year of data, fixed $1,000 capital, no compounding per trade):
+
+| Run                  | Win Rate | Total Return (≈1 year) |
+| :------------------- | :------- | :--------------------- |
+| ETH 1h @ 25x         | 56.7%    | 991%                   |
+| ETH 1h @ 100x        | 72.1%    | 5,619%                 |
+| BTC 1h @ 100x        | 75.0%    | 2,894%                 |
+
+**Important Caveats:**
+*   **"Annual Return" Interpretation:** The "Total Return" figures above represent the cumulative percentage return over the entire backtest period (~1 year), not necessarily a strict annualization formula.
+*   **Fixed Capital Sizing:** High returns (e.g., 5,000%+ at 100x leverage) are based on a fixed $1,000 notional capital per trade, which does not account for realistic live compounding of profits and losses. These figures are for illustrative purposes to compare strategy performance across different leverage levels.
+*   **Reproducibility:** These results were generated using `optimize_leverage_fixed.py`. The output is saved to `results/leverage_sweep_fixed_1k.csv`.
 
 **Note:** These are backtested results and do not guarantee future performance.
 
