@@ -11,6 +11,7 @@ from datetime import datetime
 import config_professional as config
 from indicators_professional import ProfessionalIndicators
 from strategy_professional import ProfessionalStrategy
+from hold_exit_rules import exit_rules_description, exit_rule_snapshot
 import matplotlib.pyplot as plt
 import seaborn as sns
 
@@ -68,9 +69,12 @@ class ProfessionalBacktester:
         print("\n" + "=" * 70)
         print("RUNNING PROFESSIONAL BACKTEST")
         print("=" * 70)
-        print(f"💰 Initial Capital: ${self.initial_capital:,.2f}")
+        fixed = getattr(config, "USE_FIXED_CAPITAL", False)
+        cap_label = f"${config.FIXED_CAPITAL:,.0f} fixed" if fixed else f"${self.initial_capital:,.2f}"
+        print(f"💰 Capital: {cap_label}")
         print(f"⚡ Leverage: {self.leverage}x")
-        print(f"🎯 Risk Per Trade: {config.RISK_PER_TRADE_PCT}%")
+        print(f"📐 Position size: {config.POSITION_SIZE_PCT*100:.0f}% of sizing base")
+        print(f"🚪 Exits: {exit_rules_description(self.leverage)}")
         print(f"📊 Min Confluence: {config.MIN_CONFLUENCE_SCORE}")
         print("=" * 70 + "\n")
 
@@ -78,7 +82,6 @@ class ProfessionalBacktester:
         strategy = ProfessionalStrategy(
             leverage=self.leverage,
             capital=self.initial_capital,
-            risk_pct=config.RISK_PER_TRADE_PCT
         )
 
         # Run strategy
@@ -90,7 +93,7 @@ class ProfessionalBacktester:
 
         for trade in self.trades:
             if trade['action'] == 'EXIT':
-                capital = strategy.capital
+                capital = strategy.equity
                 self.equity_curve.append({
                     'timestamp': trade['timestamp'],
                     'equity': capital
@@ -186,7 +189,8 @@ class ProfessionalBacktester:
             'exit_reasons': exit_reasons,
             'avg_confluence_score': avg_confluence,
             'win_rate_by_confluence': win_rate_by_confluence,
-            'leverage': self.leverage
+            'leverage': self.leverage,
+            'exit_rules': exit_rule_snapshot(self.leverage),
         }
 
         return metrics

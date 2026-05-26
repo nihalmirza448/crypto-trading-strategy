@@ -6,6 +6,7 @@ import numpy as np
 import json
 from datetime import datetime
 import config
+from hold_exit_rules import exit_rules_description, fixed_position_size
 from indicators import TechnicalIndicators
 from strategy import MomentumSwingStrategy
 import matplotlib.pyplot as plt
@@ -55,7 +56,8 @@ class Backtester:
         print("=" * 60)
         print(f"Initial Capital: ${self.initial_capital}")
         print(f"Leverage: {self.leverage}x")
-        print(f"Position Size: ${self.initial_capital * self.leverage}")
+        print(f"Position Size: ${fixed_position_size(self.initial_capital):,.2f} ({config.POSITION_SIZE_PCT*100:.0f}% of capital)")
+        print(f"Exits: {exit_rules_description(self.leverage)}")
         print("=" * 60 + "\n")
         
         # Initialize strategy
@@ -70,7 +72,10 @@ class Backtester:
         
         for trade in self.trades:
             if trade['action'] == 'EXIT':
-                capital += trade['net_pnl']
+                if hasattr(strategy, 'equity'):
+                    capital = strategy.equity
+                else:
+                    capital += trade['net_pnl']
                 self.equity_curve.append({
                     'timestamp': trade['timestamp'],
                     'equity': capital

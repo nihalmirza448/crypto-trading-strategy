@@ -13,6 +13,8 @@ results/
 logs/
 
 # Python
+.venv/
+.venv311/
 __pycache__/
 *.py[cod]
 *$py.class
@@ -49,3 +51,32 @@ Thumbs.db
 
 # Logs
 *.log
+.vercel
+.env*.local
+
+# Untracked files and directories not part of the core professional strategy
+.cursor/
+AGENTS_FORWARD.md
+arbitrage/
+backtest_all_timeframes.py
+backtest_bear_chento.py
+bear_liquidity_signals.py
+bear_market_regime.py
+binance_ws_feed.py
+cryptoquant_client.py
+deploy/
+fetch_cryptoquant_ohlcv.py
+forward-dashboard/
+forward_test/
+forward_test_dashboard.py
+forward_test_live.py
+get_recommendation.py
+optimize_leverage_fixed.py
+run_forward_suite.py
+run_hold_exit_backtests.py
+strategy_bear_chento.py
+test_binance_ws.py
+journal/
+templates/
+trading_env/
+venv/

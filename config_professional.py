@@ -16,25 +16,47 @@ KRAKEN_API_KEY = os.getenv('KRAKEN_API_KEY', '')
 KRAKEN_API_SECRET = os.getenv('KRAKEN_API_SECRET', '')
 COINGLASS_API_KEY = os.getenv('COINGLASS_API_KEY', '')
 
+# CryptoQuant (optional — fetch_cryptoquant_ohlcv.py). Use either Bearer token or api_key.
+CRYPTOQUANT_ACCESS_TOKEN = os.getenv('CRYPTOQUANT_ACCESS_TOKEN', '')
+CRYPTOQUANT_API_KEY = os.getenv('CRYPTOQUANT_API_KEY', '')
+CRYPTOQUANT_MARKET = os.getenv('CRYPTOQUANT_MARKET', 'spot')
+CRYPTOQUANT_EXCHANGE = os.getenv('CRYPTOQUANT_EXCHANGE', 'all_exchange')
+CRYPTOQUANT_BTC_SYMBOL = os.getenv('CRYPTOQUANT_BTC_SYMBOL', 'btc_usd')
+CRYPTOQUANT_ETH_SYMBOL = os.getenv('CRYPTOQUANT_ETH_SYMBOL', 'eth_usd')
+# Professional plan: daily bars only, max ~1 year history (Premium: hour/min, longer history).
+CRYPTOQUANT_WINDOW = os.getenv('CRYPTOQUANT_WINDOW', 'day')
+CRYPTOQUANT_MAX_LOOKBACK_DAYS = int(os.getenv('CRYPTOQUANT_MAX_LOOKBACK_DAYS', '365'))
+
 # =============================================================================
 # Trading Parameters - PROFESSIONAL APPROACH
 # =============================================================================
 
 # Leverage & Capital
-LEVERAGE = 5  # Conservative leverage (5x allows for market noise)
-CAPITAL = 7500  # Starting capital in USD
+LEVERAGE = 35  # Leverage for backtests / live (hold_exit_rules use price_move % × LEVERAGE)
+CAPITAL = 7500  # Starting capital in USD (compounding mode)
 POSITION_SIZE_PCT = 0.95  # Maximum position size (95% of capital)
 
-# Risk Management - THE MOST IMPORTANT SETTINGS
-RISK_PER_TRADE_PCT = 1.5  # Risk 1.5% of capital per trade (adjustable 0.5-2%)
-MIN_RISK_REWARD_RATIO = 2.0  # Minimum 1:2 R:R (we target 1:4 to 1:6)
+# Fixed-capital backtest: $1,000 notional base every trade, P&L sums to equity (no compounding)
+USE_FIXED_CAPITAL = False
+FIXED_CAPITAL = 1000.0
+
+# Position sizing (fixed fraction of capital — no stop-based risk sizing)
+RISK_PER_TRADE_PCT = 1.5  # Legacy name; unused for sizing when hold_exit_rules is active
+MIN_RISK_REWARD_RATIO = 2.0  # Legacy; exits use return targets below
 
 # =============================================================================
 # Entry Confluence System
 # =============================================================================
 
 # Minimum confluences required for entry
-MIN_CONFLUENCE_SCORE = 3  # Need at least 3 confluences (3-4 = reduced size, 5+ = full size)
+MIN_CONFLUENCE_SCORE = 3  # ~1–2 trades/week on 1h with relaxed pool scoring below
+
+# Trade frequency (one position at a time; return-window exits cap throughput)
+TARGET_TRADES_PER_WEEK = 1.5
+MIN_HOURS_BETWEEN_ENTRIES = 48  # min gap between entries when flat (~1.3/week on ETH 1h backtest)
+BLOCK_CVD_EXHAUSTION = False
+BLOCK_LIQUIDITY_VOID = False
+ALLOW_STRUCTURE_ONLY_ENTRY = False  # True floods signals (3–4+/week); keep False for quality
 
 # Confluence weight adjustments (if implementing weighted scoring)
 CONFLUENCE_WEIGHTS = {
@@ -83,7 +105,7 @@ LIQUIDITY_SWEEP_LOOKBACK = 3  # Candles to confirm sweep reversal
 VOLUME_PROFILE_BINS = 50  # Number of price bins for volume profile
 
 # Volume spike requirement
-VOLUME_SPIKE_MULTIPLIER = 1.5  # 1.5x average volume required
+VOLUME_SPIKE_MULTIPLIER = 1.2  # 1.2x average volume for +1 confluence
 
 # =============================================================================
 # Market Structure Parameters
@@ -92,55 +114,80 @@ VOLUME_SPIKE_MULTIPLIER = 1.5  # 1.5x average volume required
 # Trend determination
 MARKET_TREND_LOOKBACK = 20  # Recent structure to analyze for trend
 
-# Structure strength
-MIN_STRUCTURE_STRENGTH = 60  # Minimum structure consistency (0-100)
+# Structure strength (bonus confluence; lower = more structure tags)
+MIN_STRUCTURE_STRENGTH = 45  # Minimum structure consistency (0-100) for +1 confluence
 
 # Order block detection
 ORDER_BLOCK_LOOKBACK = 50  # Period for identifying order blocks
 ORDER_BLOCK_MIN_MOVE_PCT = 1.0  # Minimum % move to qualify as order block
 
 # =============================================================================
-# Stop Loss Configuration
+# Exit rules (no stop-loss) — see hold_exit_rules.py
 # =============================================================================
+# Return % is on leveraged P&L (price move % × LEVERAGE).
+MIN_HOLD_HOURS = 0  # 0 = no minimum hold; exits allowed immediately when return rules hit
+HOLD_WINDOW_END_HOURS = 48
+TARGET_RETURN_PCT = 50.0   # Exit before window end if reached
+MIN_EXIT_RETURN_PCT = 15.0  # After window end if 50% not hit; else exit at window end
 
-# Stop loss methods (in order of preference):
-# 1. Order block based (just beyond OB)
-# 2. Liquidity sweep based (beyond sweep wick)
-# 3. Structure based (below/above swing point)
-
-STOP_LOSS_PCT = 2.5  # Default stop loss percentage (if structure-based)
-MIN_STOP_DISTANCE_PCT = 1.0  # Minimum stop distance (avoid too tight stops)
-
-# Stop loss adjustments
-STOP_LOSS_BUFFER_PCT = 0.2  # Additional buffer beyond structure (0.2%)
-
-# =============================================================================
-# Take Profit Configuration
-# =============================================================================
-
-# Scaled exit approach (professional standard)
-TP1_RATIO = 2.0  # 1:2 R:R (33% exit)
-TP2_RATIO = 4.0  # 1:4 R:R (33% exit)
-TP3_RATIO = 6.0  # 1:6 R:R (34% exit - let winners run)
-
-# Take profit adjustments
-USE_LIQUIDITY_VOIDS_AS_TARGETS = True  # Target low volume areas
-USE_OPPOSITE_LIQUIDITY_AS_TARGETS = True  # Target BSL for longs, SSL for shorts
+# Legacy (unused by hold_exit_rules)
+STOP_LOSS_PCT = 2.5
+MIN_STOP_DISTANCE_PCT = 1.0
+STOP_LOSS_BUFFER_PCT = 0.2
+TP1_RATIO = 2.0
+TP2_RATIO = 4.0
+TP3_RATIO = 6.0
+USE_LIQUIDITY_VOIDS_AS_TARGETS = False
+USE_OPPOSITE_LIQUIDITY_AS_TARGETS = False
+MAX_HOLD_TIME_HOURS = 48
+MOVE_TO_BREAKEVEN_AFTER_TP1 = False
+TRAIL_STOP_AFTER_TP2 = False
+TRAILING_STOP_METHOD = 'structure'
+TRAILING_STOP_ATR_MULTIPLIER = 1.5
 
 # =============================================================================
-# Trade Management
+# Bear-market Chento liquidity strategy (strategy_bear_chento.py)
 # =============================================================================
+# Return goal (documentation): 20% account return and $500 profit implies
+# starting equity >= max(500/0.20, 500) => use at least $2,500 if both must hold.
+BEAR_GOAL_MIN_STARTING_CAPITAL_USD = 2500
 
-# Maximum hold time
-MAX_HOLD_TIME_HOURS = 72  # Max 72 hours (3 days) - swing trading timeframe
+# Liquidity execution (matches ~0.35% rule after second re-test)
+BEAR_LIQ_TOUCH_BAND_PCT = 0.12
+BEAR_LIQ_DEPART_PCT = 0.28
+BEAR_LIQ_CONFIRM_MOVE_PCT = 0.35
+BEAR_LIQ_MIN_RETESTS = 2
+BEAR_LIQ_ANCHOR_DRIFT_MAX_PCT = 0.85
 
-# Breakeven rules
-MOVE_TO_BREAKEVEN_AFTER_TP1 = True  # Move stop to BE after TP1
-TRAIL_STOP_AFTER_TP2 = True  # Trail stop after TP2
+# Regime: default "sub50" = weekly/daily/4H RSI all below threshold (macro bearish control).
+# Set BEAR_RSI_MODE = "bands" to use the tight ranges below instead.
+BEAR_RSI_MODE = "sub50"
+BEAR_RSI_SUB50_THRESHOLD = 50.0
+# Which higher-timeframe RSIs must be sub-threshold: "wd" = weekly+daily (default),
+# "wd4" = include 4H (stricter, fewer overlaps with intraday liquidity signals).
+BEAR_RSI_SUB50_PARTS = "wd"
+BEAR_WEEKLY_RSI_RANGE = (30.0, 48.0)
+BEAR_DAILY_RSI_RANGE = (38.0, 50.0)
+BEAR_4H_RSI_RANGE = (36.0, 50.0)
+BEAR_MOMENTUM_7D_MAX_PCT = -2.0
+BEAR_TREND_SCORE_RANGE = (30.0, 92.0)
 
-# Trailing stop method
-TRAILING_STOP_METHOD = 'structure'  # 'structure' or 'atr' or 'percentage'
-TRAILING_STOP_ATR_MULTIPLIER = 1.5  # If using ATR method
+# Optional on-chain / flow columns on the DataFrame (forward-filled). If absent, skipped.
+BEAR_MACRO_MVRV_MAX = 1.5
+BEAR_MACRO_SOPR_MAX = 1.0
+BEAR_MACRO_NETFLOW_MIN_BTC = 0.0
+BEAR_MACRO_TAKER_LO = 0.95
+BEAR_MACRO_TAKER_HI = 1.05
+BEAR_REQUIRE_MACRO_COLUMNS = False
+
+# Mean-reversion longs at SSL in bear tape (disable for short-only)
+BEAR_ALLOW_SSL_LONG = True
+
+# Forward / out-of-sample: first timestamp where trades are counted (inclusive).
+# Indicators are still computed on the full series before the split.
+BEAR_FORWARD_SPLIT = "2024-01-01"
+# Minimum bar index for OOS split (indicator / signal warm-up).
+BEAR_MIN_START_IDX = 200
 
 # =============================================================================
 # Market Regime Filter (Optional but Recommended)

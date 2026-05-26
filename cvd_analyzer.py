@@ -62,6 +62,9 @@ class CVDAnalyzer:
         - Wick sizes (upper and lower)
         - Volume distribution
 
+        When ``taker_buy_volume`` is present (Binance futures klines / WS feed),
+        uses true taker buy vs sell delta instead of candle-color approximation.
+
         Args:
             df: DataFrame with OHLCV data
             use_wick_analysis: Use wick-based volume distribution
@@ -69,6 +72,12 @@ class CVDAnalyzer:
         Returns:
             Series: CVD values
         """
+        if "taker_buy_volume" in df.columns and df["taker_buy_volume"].notna().any():
+            tb = df["taker_buy_volume"].fillna(0)
+            vol = df["volume"].fillna(0)
+            delta = 2 * tb - vol
+            return pd.Series(delta, index=df.index).cumsum()
+
         if not use_wick_analysis:
             return CVDAnalyzer.calculate_cvd(df)
 
