@@ -5,10 +5,10 @@ import pandas as pd
 import numpy as np
 import json
 from datetime import datetime
-import config
+import config_professional as config
 from hold_exit_rules import exit_rules_description, fixed_position_size
-from indicators import TechnicalIndicators
-from strategy import MomentumSwingStrategy
+from indicators_professional import ProfessionalIndicators
+from strategy_professional import ProfessionalStrategy
 import matplotlib.pyplot as plt
 import seaborn as sns
 
@@ -46,7 +46,7 @@ class Backtester:
         print("  - 3 SMAs (60, 90, 180)")
         print("  - Trending regime detection")
         print("  - 24h high/low breakout levels")
-        self.df = TechnicalIndicators.add_all_indicators(self.df, timeframe=config.TIMEFRAME)
+        self.df = ProfessionalIndicators.add_all_indicators(self.df, timeframe=config.TIMEFRAME)
         print("Indicators calculated successfully")
     
     def run_backtest(self):
@@ -61,7 +61,7 @@ class Backtester:
         print("=" * 60 + "\n")
         
         # Initialize strategy
-        strategy = MomentumSwingStrategy(leverage=self.leverage, capital=self.initial_capital)
+        strategy = ProfessionalStrategy(leverage=self.leverage, capital=self.initial_capital)
         
         # Run strategy
         self.trades = strategy.run(self.df)

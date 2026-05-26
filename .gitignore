@@ -80,3 +80,10 @@ journal/
 templates/
 trading_env/
 venv/
+backtest_liquidity_enhanced.py
+backtest_liquidity_strategy.py
+backtest_liquidity_v3.py
+config.py
+recommendation_engine.py
+strategy.py
+strategy_optimizer.py
