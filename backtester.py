@@ -25,16 +25,8 @@ class Backtester:
         
     def load_data(self):
         """Load historical data from CSV"""
-        # Determine data file based on timeframe in config
-        if config.TIMEFRAME == '4h':
-            data_file = f'{config.DATA_DIR}/eth_usd_4h_{config.LOOKBACK_DAYS}d.csv'
-        elif config.TIMEFRAME == '1d':
-            data_file = f'{config.DATA_DIR}/eth_usd_1440m_{config.LOOKBACK_DAYS}d.csv'
-        else:
-            data_file = f'{config.DATA_DIR}/eth_usd_60m_{config.LOOKBACK_DAYS}d.csv'
-        
-        print(f"Loading data from {data_file}...")
-        self.df = pd.read_csv(data_file)
+        print(f"Loading data from {self.data_file}...")
+        self.df = pd.read_csv(self.data_file)
         self.df['timestamp'] = pd.to_datetime(self.df['timestamp'])
         print(f"Loaded {len(self.df)} candles")
         print(f"Date range: {self.df.iloc[0]['timestamp']} to {self.df.iloc[-1]['timestamp']}")
@@ -289,15 +281,7 @@ class Backtester:
 
 def main():
     """Main backtesting function"""
-    # Check if data file exists (now looking for 365-day data)
     data_file = f"{config.DATA_DIR}/eth_usd_60m_{config.LOOKBACK_DAYS}d.csv"
-    
-    import os
-    if not os.path.exists(data_file):
-        print(f"❌ Data file not found: {data_file}")
-        print("Please run coinbase_collector.py first to fetch historical hourly data.")
-        print(f"Looking for: {data_file}")
-        return
     
     # Initialize backtester
     backtester = Backtester(
