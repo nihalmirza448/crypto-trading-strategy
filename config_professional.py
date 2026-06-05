@@ -33,12 +33,13 @@ CRYPTOQUANT_MAX_LOOKBACK_DAYS = int(os.getenv('CRYPTOQUANT_MAX_LOOKBACK_DAYS', '
 
 # Leverage & Capital
 LEVERAGE = 35  # Leverage for backtests / live (hold_exit_rules use price_move % × LEVERAGE)
-CAPITAL = 7500  # Starting capital in USD (compounding mode)
-POSITION_SIZE_PCT = 0.95  # Maximum position size (95% of capital)
+CAPITAL = 1000.0  # Starting equity (paper/backtest); P&L accumulates here
+POSITION_SIZE_PCT = 0.95  # Margin per entry = 95% of FIXED_CAPITAL when USE_FIXED_CAPITAL
 
-# Fixed-capital backtest: $1,000 notional base every trade, P&L sums to equity (no compounding)
-USE_FIXED_CAPITAL = False
-FIXED_CAPITAL = 1000.0
+# No stop-loss → never compound exposure: every entry uses FIXED_CAPITAL only, not growing equity.
+USE_FIXED_CAPITAL = True
+FIXED_CAPITAL = 1000.0  # Max sizing base per trade (margin cap ≈ FIXED_CAPITAL × POSITION_SIZE_PCT)
+MIN_EQUITY_TO_TRADE = 1000.0  # No new entries below this account equity
 
 # Position sizing (fixed fraction of capital — no stop-based risk sizing)
 RISK_PER_TRADE_PCT = 1.5  # Legacy name; unused for sizing when hold_exit_rules is active
@@ -53,10 +54,36 @@ MIN_CONFLUENCE_SCORE = 3  # ~1–2 trades/week on 1h with relaxed pool scoring b
 
 # Trade frequency (one position at a time; return-window exits cap throughput)
 TARGET_TRADES_PER_WEEK = 1.5
-MIN_HOURS_BETWEEN_ENTRIES = 48  # min gap between entries when flat (~1.3/week on ETH 1h backtest)
+MIN_HOURS_BETWEEN_ENTRIES = 48  # Legacy; use ENTRY_SPACING_HOURS_* tiers below
+
+# Confluence-scaled entry spacing (hours since last entry when flat; uses current signal score)
+ENTRY_SPACING_HOURS_SCORE_3 = 24   # score == 3 (retuned 48->24: backtest +20% trades, win rate held)
+ENTRY_SPACING_HOURS_SCORE_4_5 = 24  # score 4–5
+ENTRY_SPACING_HOURS_SCORE_6_PLUS = 12  # score >= 6
+
+
+def entry_spacing_hours_for_score(confluence_score: int) -> float:
+    """Minimum hours since last entry when flat; tier depends on current signal score."""
+    score = int(confluence_score)
+    if score >= 6:
+        return float(ENTRY_SPACING_HOURS_SCORE_6_PLUS)
+    if score >= 4:
+        return float(ENTRY_SPACING_HOURS_SCORE_4_5)
+    return float(ENTRY_SPACING_HOURS_SCORE_3)
 BLOCK_CVD_EXHAUSTION = False
 BLOCK_LIQUIDITY_VOID = False
 ALLOW_STRUCTURE_ONLY_ENTRY = False  # True floods signals (3–4+/week); keep False for quality
+
+# =============================================================================
+# Trend Momentum (Continuation) strategy — strategy_trend_momentum.py
+# Trades WITH strong pump/dump days; high-confirmation bar (separate from reversal).
+# =============================================================================
+TREND_MIN_CONFLUENCE_SCORE = 7      # of 9 — "very strong / full confirmation" gate
+TREND_MIN_STRUCTURE_STRENGTH = 60   # structure-strength +1 threshold for continuation
+TREND_MOMENTUM_LOOKBACK = 6         # bars used to measure the pump/dump thrust
+TREND_MOMENTUM_MIN_PCT = 2.0        # min |price move| over lookback to qualify as a thrust
+TREND_RSI_MAX = 80                  # long: skip blow-off tops above this RSI
+TREND_RSI_MIN = 20                  # short: skip capitulation bottoms below this RSI
 
 # Confluence weight adjustments (if implementing weighted scoring)
 CONFLUENCE_WEIGHTS = {
@@ -127,8 +154,18 @@ ORDER_BLOCK_MIN_MOVE_PCT = 1.0  # Minimum % move to qualify as order block
 # Return % is on leveraged P&L (price move % × LEVERAGE).
 MIN_HOLD_HOURS = 0  # 0 = no minimum hold; exits allowed immediately when return rules hit
 HOLD_WINDOW_END_HOURS = 48
-TARGET_RETURN_PCT = 50.0   # Exit before window end if reached
-MIN_EXIT_RETURN_PCT = 15.0  # After window end if 50% not hit; else exit at window end
+TARGET_RETURN_PCT = 50.0   # Legacy full exit when USE_SCALED_EXITS=False
+MIN_EXIT_RETURN_PCT = 15.0  # After window end if target not hit; else exit at window end
+
+# Scaled take-profit (USE_SCALED_EXITS=True) — goal: TARGET_NET_TRADE_RETURN_PCT after fees
+USE_SCALED_EXITS = True
+TARGET_NET_TRADE_RETURN_PCT = 50.0  # Design goal: +50% on posted margin, net of fees (full trade)
+TP1_RETURN_PCT = 55.0   # Gross on margin — bank half (55% clears ~50% net on that leg after fees)
+TP1_EXIT_PORTION = 0.50  # Close 50% of position at TP1
+TP2_RETURN_PCT = 100.0  # Second spike — gross on margin
+TP2_EXIT_PORTION = 0.50  # Close 50% of remainder (= 25% of original size)
+RUNNER_TRAIL_GIVEBACK_PCT = 25.0  # Close runner if return falls this much from peak
+MIN_RUNNER_RETURN_PCT = 15.0  # Don't trail out runner below this gross return
 
 # Legacy (unused by hold_exit_rules)
 STOP_LOSS_PCT = 2.5

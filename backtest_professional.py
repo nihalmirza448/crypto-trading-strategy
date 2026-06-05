@@ -19,10 +19,10 @@ import seaborn as sns
 class ProfessionalBacktester:
     """Backtest professional trading strategy"""
 
-    def __init__(self, data_file=None, leverage=5, capital=7500):
+    def __init__(self, data_file=None, leverage=5, capital=None):
         self.data_file = data_file
         self.leverage = leverage
-        self.initial_capital = capital
+        self.initial_capital = float(capital if capital is not None else config.CAPITAL)
         self.df = None
         self.trades = []
         self.equity_curve = []

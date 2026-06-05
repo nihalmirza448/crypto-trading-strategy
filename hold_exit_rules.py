@@ -1,15 +1,21 @@
 """
 Shared hold / return exit rules (no stop-loss).
 
-- Optional minimum hold: MIN_HOLD_HOURS (0 = none; legacy default was 24)
-- By HOLD_WINDOW_END_HOURS (default 48): exit if leveraged return >= TARGET_RETURN_PCT (50%)
+Legacy mode (USE_SCALED_EXITS=False):
+- By HOLD_WINDOW_END_HOURS: exit if leveraged return >= TARGET_RETURN_PCT (50%)
 - At/after window end: exit if return >= MIN_EXIT_RETURN_PCT (15%), else force exit
+
+Scaled mode (USE_SCALED_EXITS=True):
+- TP1: take TP1_EXIT_PORTION (50%) at TP1_RETURN_PCT gross on margin
+- TP2: take TP2_EXIT_PORTION of remainder (25% orig) at TP2_RETURN_PCT
+- Runner: trail peak − RUNNER_TRAIL_GIVEBACK_PCT; 48h window on remainder
+- Design goal: TARGET_NET_TRADE_RETURN_PCT (+50% on margin net of fees, full trade)
 """
 
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional, Tuple, Union
+from typing import Any, Optional, Tuple, Union
 
 try:
     import config_professional as config
@@ -46,59 +52,101 @@ def should_exit(
     current_price: float,
     direction: Union[int, str],
     leverage: float = 1.0,
-) -> Tuple[bool, Optional[str]]:
+    position_state: Optional[dict[str, Any]] = None,
+) -> Tuple[bool, Optional[str], float]:
     """
-    Returns (should_exit, reason).
+    Returns (should_exit, reason, exit_portion).
+    exit_portion is a fraction of the *current* open position (0–1).
     """
     min_hold = float(_cfg("MIN_HOLD_HOURS", 0))
     window_end = float(_cfg("HOLD_WINDOW_END_HOURS", 48))
     target = float(_cfg("TARGET_RETURN_PCT", 50))
     min_exit = float(_cfg("MIN_EXIT_RETURN_PCT", 15))
+    use_scaled = bool(_cfg("USE_SCALED_EXITS", False))
 
     hrs = hold_hours(entry_time, current_time)
     if min_hold > 0 and hrs < min_hold:
-        return False, None
+        return False, None, 0.0
 
     ret = leveraged_return_pct(price_pnl_pct(entry_price, current_price, direction), leverage)
+    ret = round(ret, 6)
+    state = position_state or {}
+    tp1_done = bool(state.get("tp1_done", False))
+    tp2_done = bool(state.get("tp2_done", False))
+    peak = max(float(state.get("peak_return_pct", ret)), ret)
+
+    if use_scaled:
+        tp1_ret = float(_cfg("TP1_RETURN_PCT", 55))
+        tp1_portion = float(_cfg("TP1_EXIT_PORTION", 0.50))
+        tp2_ret = float(_cfg("TP2_RETURN_PCT", 100))
+        tp2_portion = float(_cfg("TP2_EXIT_PORTION", 0.50))
+        trail_giveback = float(_cfg("RUNNER_TRAIL_GIVEBACK_PCT", 25))
+
+        if not tp1_done and ret >= tp1_ret:
+            return True, "tp1_partial", tp1_portion
+
+        if tp1_done and not tp2_done and ret >= tp2_ret:
+            return True, "tp2_partial", tp2_portion
+
+        if tp1_done and peak > 0 and (peak - ret) >= trail_giveback and ret > float(_cfg("MIN_RUNNER_RETURN_PCT", 15)):
+            return True, "trail_runner", 1.0
+
+        if hrs >= window_end:
+            if ret >= min_exit:
+                return True, "min_15pct", 1.0
+            return True, "window_end", 1.0
+
+        return False, None, 0.0
 
     if hrs < window_end and ret >= target:
-        return True, "target_50pct"
+        return True, "target_50pct", 1.0
 
     if hrs >= window_end:
         if ret >= min_exit:
-            return True, "min_15pct"
-        return True, "window_end"
+            return True, "min_15pct", 1.0
+        return True, "window_end", 1.0
 
-    return False, None
+    return False, None, 0.0
 
 
 def sizing_capital(account_equity: float) -> float:
     """Notional base for position sizing (fixed $1k mode vs compounding equity)."""
-    if bool(_cfg("USE_FIXED_CAPITAL", False)):
+    if bool(_cfg("USE_FIXED_CAPITAL", True)):
         return float(_cfg("FIXED_CAPITAL", 1000.0))
     return account_equity
 
 
+def max_entry_margin() -> float:
+    """Hard cap on margin per entry when USE_FIXED_CAPITAL (wins do not increase exposure)."""
+    return float(_cfg("FIXED_CAPITAL", 1000.0)) * float(_cfg("POSITION_SIZE_PCT", 0.95))
+
+
 def fixed_position_size(account_equity: float) -> float:
     pct = float(_cfg("POSITION_SIZE_PCT", 0.95))
-    base = sizing_capital(account_equity)
-    if bool(_cfg("USE_FIXED_CAPITAL", False)):
-        # Cannot deploy more margin than available equity
-        deployable = max(0.0, float(account_equity)) * pct
-        return min(base * pct, deployable)
-    return base * pct
+    equity = max(0.0, float(account_equity))
+    if bool(_cfg("USE_FIXED_CAPITAL", True)):
+        # Always size from FIXED_CAPITAL, never from equity above that base (no compounding).
+        cap = max_entry_margin()
+        deployable = equity * pct
+        return min(cap, deployable)
+    return equity * pct
 
 
 def min_equity_to_trade() -> float:
-    """Minimum equity required to open the next position."""
-    pct = float(_cfg("POSITION_SIZE_PCT", 0.95))
-    base = sizing_capital(1000.0)
-    return base * pct * 0.1  # at least 10% of normal margin available
+    """Minimum account equity required to open the next position."""
+    explicit = _cfg("MIN_EQUITY_TO_TRADE", None)
+    if explicit is not None:
+        return float(explicit)
+    if bool(_cfg("USE_FIXED_CAPITAL", True)):
+        return float(_cfg("FIXED_CAPITAL", 1000.0))
+    return float(_cfg("CAPITAL", 1000.0))
 
 
 def exit_rule_snapshot(leverage: float = 1.0) -> dict:
     """Config snapshot for backtests / recommendations (no stop-loss)."""
-    return {
+    fixed = bool(_cfg("USE_FIXED_CAPITAL", True))
+    scaled = bool(_cfg("USE_SCALED_EXITS", False))
+    snap = {
         "min_hold_hours": float(_cfg("MIN_HOLD_HOURS", 0)),
         "hold_window_end_hours": float(_cfg("HOLD_WINDOW_END_HOURS", 48)),
         "target_return_pct": float(_cfg("TARGET_RETURN_PCT", 50)),
@@ -106,7 +154,23 @@ def exit_rule_snapshot(leverage: float = 1.0) -> dict:
         "position_size_pct": float(_cfg("POSITION_SIZE_PCT", 0.95)),
         "leverage": leverage,
         "no_stop_loss": True,
+        "use_fixed_capital": fixed,
+        "fixed_capital": float(_cfg("FIXED_CAPITAL", 1000.0)) if fixed else None,
+        "max_entry_margin": max_entry_margin() if fixed else None,
+        "use_scaled_exits": scaled,
+        "target_net_trade_return_pct": float(_cfg("TARGET_NET_TRADE_RETURN_PCT", 50)),
     }
+    if scaled:
+        snap.update(
+            {
+                "tp1_return_pct": float(_cfg("TP1_RETURN_PCT", 55)),
+                "tp1_exit_portion": float(_cfg("TP1_EXIT_PORTION", 0.50)),
+                "tp2_return_pct": float(_cfg("TP2_RETURN_PCT", 100)),
+                "tp2_exit_portion": float(_cfg("TP2_EXIT_PORTION", 0.50)),
+                "runner_trail_giveback_pct": float(_cfg("RUNNER_TRAIL_GIVEBACK_PCT", 25)),
+            }
+        )
+    return snap
 
 
 def target_prices(
@@ -135,6 +199,14 @@ def exit_rules_description(leverage: float = 1.0) -> str:
         if s["min_hold_hours"] <= 0
         else f"Min hold {s['min_hold_hours']:.0f}h"
     )
+    if s.get("use_scaled_exits"):
+        return (
+            f"{min_part} | scaled: "
+            f"{s['tp1_exit_portion']*100:.0f}% off @ {s['tp1_return_pct']:.0f}%+ | "
+            f"{s['tp2_exit_portion']*100:.0f}% of rest @ {s['tp2_return_pct']:.0f}%+ | "
+            f"trail −{s['runner_trail_giveback_pct']:.0f}% from peak | "
+            f"goal ≥{s['target_net_trade_return_pct']:.0f}% net on margin | no stop-loss"
+        )
     return (
         f"{min_part} | "
         f"{s['target_return_pct']:.0f}% return by {s['hold_window_end_hours']:.0f}h | "

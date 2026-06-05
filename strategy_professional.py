@@ -11,7 +11,7 @@ Based on institutional trading methodology:
 
 import pandas as pd
 import numpy as np
-from hold_exit_rules import fixed_position_size, min_equity_to_trade, should_exit
+from hold_exit_rules import fixed_position_size, leveraged_return_pct, min_equity_to_trade, price_pnl_pct, should_exit
 
 try:
     import config_professional as config
@@ -32,14 +32,14 @@ class ProfessionalStrategy:
     ☐ Higher timeframe confirmation
     ☐ Clean price action
 
-    Exits (hold_exit_rules):
-    - No stop-loss; fixed position size (POSITION_SIZE_PCT of capital)
-    - No minimum hold; target 50% leveraged return within 48h; else exit at 15%+ or at 48h
+    Exits (hold_exit_rules, scaled when USE_SCALED_EXITS):
+    - TP1: 50% off at +55% gross on margin; TP2: 50% of rest at +100%; trail runner; 48h window
+    - Goal: +50% net on margin after fees (TARGET_NET_TRADE_RETURN_PCT)
     """
 
-    def __init__(self, leverage=5, capital=7500, risk_pct=1.5):
+    def __init__(self, leverage=5, capital=1000, risk_pct=1.5):
         self.leverage = leverage
-        self.use_fixed_capital = bool(getattr(config, "USE_FIXED_CAPITAL", False))
+        self.use_fixed_capital = bool(getattr(config, "USE_FIXED_CAPITAL", True))
         self.sizing_base = float(getattr(config, "FIXED_CAPITAL", 1000.0)) if self.use_fixed_capital else float(capital)
         self.equity = float(capital)
         self.capital = float(capital)
@@ -54,6 +54,8 @@ class ProfessionalStrategy:
         self.tp3_price = 0
         self.tp1_hit = False
         self.tp2_hit = False
+        self.peak_return_pct = 0.0
+        self.initial_position_size = 0.0
         self.entry_confluence_score = 0
         self.last_entry_time = None
 
@@ -177,9 +179,9 @@ class ProfessionalStrategy:
 
         return score, direction, details
 
-    def _entry_spacing_ok(self, df, idx) -> bool:
-        """Enforce minimum time between new entries (targets ~1–2 trades/week)."""
-        min_h = float(getattr(config, "MIN_HOURS_BETWEEN_ENTRIES", 0))
+    def _entry_spacing_ok(self, df, idx, confluence_score: int = 0) -> bool:
+        """Enforce min gap since last entry when flat; wait shrinks as confluence score rises."""
+        min_h = config.entry_spacing_hours_for_score(confluence_score)
         if min_h <= 0 or self.last_entry_time is None:
             return True
         ts = df.iloc[idx]['timestamp']
@@ -218,15 +220,23 @@ class ProfessionalStrategy:
         return True, direction, score, details
 
     def enter_position(self, df, idx, direction, confluence_score, details):
-        """Enter a position (fixed size, no stop-loss)."""
+        """Enter a position (fixed $1k exposure when USE_FIXED_CAPITAL; no stop-loss)."""
         row = df.iloc[idx]
         entry_price = row['close']
         position_size = fixed_position_size(self.equity)
+        if self.use_fixed_capital:
+            from hold_exit_rules import max_entry_margin
+
+            position_size = min(position_size, max_entry_margin())
 
         self.position = direction
         self.entry_price = entry_price
         self.entry_time = row['timestamp']
         self.position_size = position_size
+        self.initial_position_size = position_size
+        self.tp1_hit = False
+        self.tp2_hit = False
+        self.peak_return_pct = 0.0
         self.entry_confluence_score = confluence_score
         self.last_entry_time = row['timestamp']
 
@@ -242,21 +252,31 @@ class ProfessionalStrategy:
         }
 
     def check_exit_conditions(self, df, idx):
-        """Exit via hold_exit_rules (50% by 48h, else 15%+ / window end; no min hold)."""
+        """Exit via hold_exit_rules (scaled TP + trail, or legacy full exit)."""
         if self.position is None:
             return False, None, 1.0
 
         row = df.iloc[idx]
-        ok, reason = should_exit(
+        ret = leveraged_return_pct(
+            price_pnl_pct(self.entry_price, row["close"], self.position),
+            self.leverage,
+        )
+        self.peak_return_pct = max(self.peak_return_pct, ret)
+        ok, reason, portion = should_exit(
             self.entry_time,
             row['timestamp'],
             self.entry_price,
             row['close'],
             self.position,
             self.leverage,
+            position_state={
+                "tp1_done": self.tp1_hit,
+                "tp2_done": self.tp2_hit,
+                "peak_return_pct": self.peak_return_pct,
+            },
         )
         if ok:
-            return True, reason, 1.0
+            return True, reason, portion if portion > 0 else 1.0
         return False, None, 1.0
 
     def exit_position(self, df, idx, reason, exit_portion=1.0):
@@ -278,9 +298,11 @@ class ProfessionalStrategy:
         pnl_dollar = portion_size * (pnl_pct_leveraged / 100)
         pnl_dollar = max(pnl_dollar, -portion_size)
 
-        # Apply fees and slippage
-        fees = portion_size * self.leverage * (config.TRADING_FEE_TAKER_PCT / 100) * 2
-        slippage = portion_size * self.leverage * (config.SLIPPAGE_PCT / 100) * 2
+        # Fees/slippage on this exit leg only (entry leg not modeled on ENTER)
+        fee_pct = config.TRADING_FEE_TAKER_PCT / 100
+        slip_pct = config.SLIPPAGE_PCT / 100
+        fees = portion_size * self.leverage * fee_pct
+        slippage = portion_size * self.leverage * slip_pct
 
         # Calculate funding costs
         hold_time_hours = (row['timestamp'] - self.entry_time).total_seconds() / 3600
@@ -313,13 +335,21 @@ class ProfessionalStrategy:
             'confluence_score': self.entry_confluence_score
         }
 
-        if exit_portion >= 1.0:
+        if exit_portion >= 1.0 or self.position_size * (1 - exit_portion) < 1e-6:
             self.position = None
             self.entry_price = 0
             self.entry_time = None
             self.position_size = 0
+            self.initial_position_size = 0
+            self.tp1_hit = False
+            self.tp2_hit = False
+            self.peak_return_pct = 0.0
         else:
             self.position_size *= (1 - exit_portion)
+            if reason == "tp1_partial":
+                self.tp1_hit = True
+            elif reason == "tp2_partial":
+                self.tp2_hit = True
 
         return trade_result
 
@@ -343,7 +373,7 @@ class ProfessionalStrategy:
             if self.position is None:
                 # Look for entry
                 should_enter, direction, score, details = self.check_entry_conditions(df, idx)
-                if should_enter and self.equity >= min_equity_to_trade() and self._entry_spacing_ok(df, idx):
+                if should_enter and self.equity >= min_equity_to_trade() and self._entry_spacing_ok(df, idx, score):
                     entry = self.enter_position(df, idx, direction, score, details)
                     trades.append(entry)
             else:
