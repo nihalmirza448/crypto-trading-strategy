@@ -8,7 +8,7 @@ Legacy mode (USE_SCALED_EXITS=False):
 Scaled mode (USE_SCALED_EXITS=True):
 - TP1: take TP1_EXIT_PORTION (50%) at TP1_RETURN_PCT gross on margin
 - TP2: take TP2_EXIT_PORTION of remainder (25% orig) at TP2_RETURN_PCT
-- Runner: trail peak − RUNNER_TRAIL_GIVEBACK_PCT; 48h window on remainder
+- Runner: trail peak − RUNNER_TRAIL_GIVEBACK_PCT; optional HOLD_WINDOW_END_HOURS cap
 - Design goal: TARGET_NET_TRADE_RETURN_PCT (+50% on margin net of fees, full trade)
 """
 
@@ -91,17 +91,17 @@ def should_exit(
         if tp1_done and peak > 0 and (peak - ret) >= trail_giveback and ret > float(_cfg("MIN_RUNNER_RETURN_PCT", 15)):
             return True, "trail_runner", 1.0
 
-        if hrs >= window_end:
+        if window_end > 0 and hrs >= window_end:
             if ret >= min_exit:
                 return True, "min_15pct", 1.0
             return True, "window_end", 1.0
 
         return False, None, 0.0
 
-    if hrs < window_end and ret >= target:
+    if (window_end <= 0 or hrs < window_end) and ret >= target:
         return True, "target_50pct", 1.0
 
-    if hrs >= window_end:
+    if window_end > 0 and hrs >= window_end:
         if ret >= min_exit:
             return True, "min_15pct", 1.0
         return True, "window_end", 1.0
@@ -200,12 +200,23 @@ def exit_rules_description(leverage: float = 1.0) -> str:
         else f"Min hold {s['min_hold_hours']:.0f}h"
     )
     if s.get("use_scaled_exits"):
+        window_part = (
+            f"{s['hold_window_end_hours']:.0f}h window | "
+            if s["hold_window_end_hours"] > 0
+            else "no time cap | "
+        )
         return (
             f"{min_part} | scaled: "
             f"{s['tp1_exit_portion']*100:.0f}% off @ {s['tp1_return_pct']:.0f}%+ | "
             f"{s['tp2_exit_portion']*100:.0f}% of rest @ {s['tp2_return_pct']:.0f}%+ | "
             f"trail −{s['runner_trail_giveback_pct']:.0f}% from peak | "
+            f"{window_part}"
             f"goal ≥{s['target_net_trade_return_pct']:.0f}% net on margin | no stop-loss"
+        )
+    if s["hold_window_end_hours"] <= 0:
+        return (
+            f"{min_part} | "
+            f"{s['target_return_pct']:.0f}% return anytime | no time cap | no stop-loss"
         )
     return (
         f"{min_part} | "

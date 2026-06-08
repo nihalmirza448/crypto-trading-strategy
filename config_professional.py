@@ -153,7 +153,7 @@ ORDER_BLOCK_MIN_MOVE_PCT = 1.0  # Minimum % move to qualify as order block
 # =============================================================================
 # Return % is on leveraged P&L (price move % × LEVERAGE).
 MIN_HOLD_HOURS = 0  # 0 = no minimum hold; exits allowed immediately when return rules hit
-HOLD_WINDOW_END_HOURS = 48
+HOLD_WINDOW_END_HOURS = 0  # 0 = no forced time exit; close only on TP / trail rules
 TARGET_RETURN_PCT = 50.0   # Legacy full exit when USE_SCALED_EXITS=False
 MIN_EXIT_RETURN_PCT = 15.0  # After window end if target not hit; else exit at window end
 
@@ -176,7 +176,7 @@ TP2_RATIO = 4.0
 TP3_RATIO = 6.0
 USE_LIQUIDITY_VOIDS_AS_TARGETS = False
 USE_OPPOSITE_LIQUIDITY_AS_TARGETS = False
-MAX_HOLD_TIME_HOURS = 48
+MAX_HOLD_TIME_HOURS = 0  # unused by hold_exit_rules; 0 = no max hold cap
 MOVE_TO_BREAKEVEN_AFTER_TP1 = False
 TRAIL_STOP_AFTER_TP2 = False
 TRAILING_STOP_METHOD = 'structure'
