@@ -28,6 +28,9 @@ eggs/
 .eggs/
 lib/
 lib64/
+# The Next.js web app has its own lib/ of source modules — do not ignore it.
+!paymyrent-web/lib/
+!paymyrent-web/lib/**
 parts/
 sdist/
 var/
