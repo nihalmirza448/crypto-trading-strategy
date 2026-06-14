@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ForwardSnapshot } from "@/lib/types";
 import { decisionTone } from "@/lib/score";
+import { lookupByTrack } from "@/lib/track";
 import Link from "next/link";
 
 export default function SignalsPage() {
@@ -26,7 +27,7 @@ export default function SignalsPage() {
     return () => clearInterval(id);
   }, [load]);
 
-  const log = trackId ? data?.decision_logs?.[trackId] : null;
+  const log = trackId ? lookupByTrack(data?.decision_logs, trackId) : null;
   const rows = (log?.rows || []).filter(
     (r) => minScore <= 0 || r.score >= minScore || r.decision === "ENTER" || r.decision === "EXIT",
   ).slice(0, limit);

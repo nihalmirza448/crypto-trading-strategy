@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ForwardSnapshot } from "@/lib/types";
 import { formatAge } from "@/lib/score";
+import { lookupByTrack } from "@/lib/track";
 import { TopMetricsStrip } from "./TopMetricsStrip";
 import { ConfluenceFlowDiagram } from "./ConfluenceFlowDiagram";
 import { RulesSidebar } from "./RulesSidebar";
@@ -57,11 +58,11 @@ export function DashboardClient() {
   );
 
   const logRows = useMemo(
-    () => data?.decision_logs?.[track?.track_id || ""]?.rows || [],
+    () => lookupByTrack(data?.decision_logs, track?.track_id)?.rows || [],
     [data, track],
   );
 
-  const trend = data?.confluence_trend?.[track?.track_id || ""] || [];
+  const trend = lookupByTrack(data?.confluence_trend, track?.track_id) || [];
 
   return (
     <div className="terminal-shell">
