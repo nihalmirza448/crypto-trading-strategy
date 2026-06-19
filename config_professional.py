@@ -39,7 +39,7 @@ POSITION_SIZE_PCT = 0.95  # Margin per entry = 95% of FIXED_CAPITAL when USE_FIX
 # No stop-loss → never compound exposure: every entry uses FIXED_CAPITAL only, not growing equity.
 USE_FIXED_CAPITAL = True
 FIXED_CAPITAL = 1000.0  # Max sizing base per trade (margin cap ≈ FIXED_CAPITAL × POSITION_SIZE_PCT)
-MIN_EQUITY_TO_TRADE = 1000.0  # No new entries below this account equity
+MIN_EQUITY_TO_TRADE = 0.0  # No floor: keep taking (progressively smaller) entries until equity hits $0
 
 # Position sizing (fixed fraction of capital — no stop-based risk sizing)
 RISK_PER_TRADE_PCT = 1.5  # Legacy name; unused for sizing when hold_exit_rules is active
